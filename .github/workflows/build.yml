@@ -14,9 +14,15 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  # 下载物缓存版本号：改工具链时才需要改这里
+  TOOLS_CACHE_KEY: adclean-tools-v1-platform34-r8-9.5.32
+  R8_VERSION: 9.5.32
+  PLATFORM_ZIP: platform-34-ext7_r02.zip
+
 jobs:
   build:
-    # 全部原生：arm64 runner + Debian/Ubuntu 自带的 arm64 aapt/zipalign，
+    # 全部原生：arm64 runner + Ubuntu/Debian 自带的 arm64 aapt/zipalign，
     # 不用 Google 的 x86_64 build-tools，也不做任何转译。
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
@@ -33,38 +39,54 @@ jobs:
           uname -m
           test "$(uname -m)" = "aarch64"
 
+      # 下载物（android.jar 的 zip、r8.jar，约 84MB）走缓存，重复构建不再下载
+      - name: 缓存工具链（android.jar / r8）
+        id: tools-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/android-cache
+          key: ${{ env.TOOLS_CACHE_KEY }}
+          restore-keys: |
+            adclean-tools-v1-
+
+      - name: 缓存命中情况
+        run: |
+          echo "cache-hit=${{ steps.tools-cache.outputs.cache-hit }}"
+          echo "接在 GITHUB_STEP_SUMMARY 上，日志里也能看到" >> "$GITHUB_STEP_SUMMARY"
+          echo "| 项 | 值 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| --- | --- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| tools cache | ${{ steps.tools-cache.outputs.cache-hit || 'false' }} |" >> "$GITHUB_STEP_SUMMARY"
+          ls -l ~/android-cache 2>/dev/null || true
+
       - name: 安装原生打包工具
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends \
             aapt zipalign apksigner unzip zip curl
-          aapt version
-          zipalign -h 2>&1 | head -1
-          apksigner --version
-          file "$(command -v aapt)" "$(command -v zipalign)"
-
-      - name: 缓存 platform zip 与 r8
-        uses: actions/cache@v6
-        with:
-          path: ~/android-cache
-          key: adclean-tools-platform34-v1-r8-9.5.32
+          {
+            echo "== aapt"; aapt version
+            echo "== zipalign"; zipalign -h 2>&1 | head -1
+            echo "== apksigner"; apksigner --version
+            echo "== 架构"; file "$(command -v aapt)" "$(command -v zipalign)"; uname -m
+          } | tee tools.txt
 
       # android.jar 是架构无关的 Java 资源包；aapt 用 arm64 原生版本。
       # 直接下官方 zip（不用 sdkmanager，它装的 jar 会被 Debian aapt 报
       # "Entry offset ... points outside the Type's boundaries"）。
       - name: 准备 android.jar
-        env:
-          PLATFORM_ZIP: platform-34-ext7_r02.zip
         run: |
           set -euo pipefail
           cache="$HOME/android-cache"
           mkdir -p "$cache" .sdk/platforms
           zip="$cache/$PLATFORM_ZIP"
           if ! unzip -tq "$zip" >/dev/null 2>&1; then
-            echo "下载 $PLATFORM_ZIP"
-            curl -sSL --retry 5 --retry-delay 3 -o "$zip" \
+            echo "缓存没命中，下载 $PLATFORM_ZIP"
+            curl -fsSL --retry 5 --retry-delay 3 -o "$zip" \
               "https://dl.google.com/android/repository/$PLATFORM_ZIP"
+          else
+            echo "缓存命中：$zip"
           fi
+          unzip -tq "$zip" | tail -1
           unzip -q -o "$zip" -d .sdk/platforms
           ls -l .sdk/platforms/*/android.jar
           # 冒烟：确认 arm64 aapt 真能链接这个 jar
@@ -77,19 +99,22 @@ jobs:
             -I .sdk/platforms/android-34/android.jar -F "$RUNNER_TEMP/jarcheck/smoke.apk"
           echo SMOKE_OK
 
-      - name: 准备 r8（纯 Java，由 arm64 JVM 执行）
+      # r8 是纯 Java 工具（arm64 JVM 原生执行），只发在 Google Maven
+      - name: 准备 r8
         run: |
           set -euo pipefail
           cache="$HOME/android-cache"
-          jar="$cache/r8-9.5.32.jar"
-          # r8 只发在 Google Maven，Maven Central 没有
+          jar="$cache/r8-$R8_VERSION.jar"
           if [ ! -s "$jar" ] || ! java -cp "$jar" com.android.tools.r8.D8 --version >/dev/null 2>&1; then
+            echo "缓存没命中，下载 r8-$R8_VERSION.jar"
             curl -fsSL --retry 5 --retry-delay 3 -o "$jar" \
-              "https://dl.google.com/dl/android/maven2/com/android/tools/r8/9.5.32/r8-9.5.32.jar"
+              "https://dl.google.com/dl/android/maven2/com/android/tools/r8/$R8_VERSION/r8-$R8_VERSION.jar"
+          else
+            echo "缓存命中：$jar"
           fi
           test -s "$jar"
           java -cp "$jar" com.android.tools.r8.D8 --version
-          cp "$jar" .sdk/r8-9.5.32.jar
+          cp "$jar" ".sdk/r8-$R8_VERSION.jar"
 
       - name: 编译
         shell: bash
@@ -97,28 +122,51 @@ jobs:
           ANDROID_SDK_ROOT: ${{ github.workspace }}/.sdk
         run: |
           set -o pipefail
+          touch build.log
           chmod +x build.sh
           rm -f adclean-*.apk adclean.apk
-          ./build.sh 2>&1 | tee build.log
+          ./build.sh 2>&1 | tee -a build.log
 
       - name: 编译信息
         if: always()
         shell: bash
         run: |
           {
-            echo "== uname"; uname -m
+            echo "== commit: $GITHUB_SHA"
+            echo "== 事件: $GITHUB_EVENT_NAME / $GITHUB_REF"
+            echo "== 架构"; uname -m
             echo "== java"; java -version 2>&1
-            echo "== tools"; aapt version 2>&1 | head -2
+            echo "== 工具"; cat tools.txt 2>/dev/null
             echo "== 产物"; ls -l adclean-*.apk adclean.apk 2>&1
+            echo "== build 目录"; find build -maxdepth 2 2>/dev/null | head -30
           } > build-info.txt || true
           cat build-info.txt
+          {
+            echo ""
+            echo "### 构建结果"
+            echo ""
+            echo '```'
+            cat build-info.txt
+            echo '```'
+            echo ""
+            echo "### build.log 尾部"
+            echo ""
+            echo '```'
+            tail -25 build.log 2>/dev/null
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: 失败现场打包
         if: failure()
         shell: bash
         run: |
-          tar czf build-failure.tar.gz build.log build-info.txt build 2>/dev/null \
-            || tar czf build-failure.tar.gz build.log build-info.txt 2>/dev/null || true
+          {
+            echo "== 失败的 commit: $GITHUB_SHA"
+            echo "== 事件: $GITHUB_EVENT_NAME / $GITHUB_REF"
+          } > failure-context.txt
+          tar czf build-failure.tar.gz build.log build-info.txt tools.txt failure-context.txt build 2>/dev/null \
+            || tar czf build-failure.tar.gz build.log build-info.txt tools.txt failure-context.txt 2>/dev/null || true
+          ls -l build-failure.tar.gz 2>&1 || true
 
       - name: 取版本号
         shell: bash
@@ -137,6 +185,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # 日志每次都上传（成功也上传），方便回头查工具链与 hook 编译情况
       - name: 上传日志（总是）
         uses: actions/upload-artifact@v7
         if: always()
@@ -145,8 +194,9 @@ jobs:
           path: |
             build.log
             build-info.txt
+            tools.txt
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 30
 
       - name: 上传失败现场（失败时）
         uses: actions/upload-artifact@v7
@@ -156,6 +206,7 @@ jobs:
           path: |
             build-failure.tar.gz
             build-info.txt
+            failure-context.txt
           if-no-files-found: ignore
           retention-days: 30
 
