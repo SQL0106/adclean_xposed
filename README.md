@@ -7,7 +7,7 @@ LSPosed 模块，API **102**（libxposed），一个模块覆盖四个应用：
 | 歪麦霸王餐 | `com.waimaiii.waimaiii` | 1.1.220 (vc303) |
 | 小蚕惠生活 | `com.realtech.xiaocan` | 3.22.4 (vc3040) |
 | 洪城一卡通 | `com.jieyisoft.weex.yktApp` | 3.2.2 (vc30202) |
-| 魔方网盘 | `com.mfcloudcalculate.networkdisk` | 3.3.6 (vc3248) |
+| 123云盘 | `com.mfcloudcalculate.networkdisk` | 3.3.6 (vc3248) |
 
 作用域（`META-INF/xposed/scope.list`）已内置四个包名，配合 `staticScope=true`，
 安装后只要在 LSPosed 里启用模块、勾选这四个应用（新版 LSPosed 会自动带上）即可，
@@ -43,7 +43,7 @@ LSPosed 模块，API **102**（libxposed），一个模块覆盖四个应用：
 
 ## 已知限制
 
-- **Flutter 自绘内容拦不住**。歪麦、小蚕、魔方都是 Flutter 应用，SDK 广告之外还有
+- **Flutter 自绘内容拦不住**。歪麦、小蚕、123云盘都是 Flutter 应用，SDK 广告之外还有
   一部分是 Dart 直接画在界面里的运营位；Java 层 hook 无法移除，只能去掉这些位置
   背后的广告 SDK 物料（大多数情况下会变成空白或直接不显示）。
 - 三个 Flutter 应用都带加固壳（网易易盾 / appsec / 自研），业务 dex 运行时才解密，

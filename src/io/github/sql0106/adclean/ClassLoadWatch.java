@@ -10,7 +10,7 @@ import io.github.sql0106.adclean.compat.XposedBridge;
 /**
  * 运行时类加载观察器。
  *
- * <p>歪麦、小蚕、魔方三个应用都带壳（业务 dex 运行时才解密加载），所以模块加载时
+ * <p>歪麦、小蚕、123云盘三个应用都带壳（业务 dex 运行时才解密加载），所以模块加载时
  * 用 {@code Class.forName} 找不到业务类。这里挂 {@link ClassLoader#loadClass}，
  * 每加载出一个类就交给各 killer 判断一次：只对命中名单的类做处理，其余直接返回。</p>
  *

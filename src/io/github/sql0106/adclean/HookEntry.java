@@ -9,7 +9,7 @@ import io.github.sql0106.adclean.compat.XposedBridge;
 /**
  * 应用去广告模块入口（libxposed API 102）。
  *
- * <p>一个模块覆盖四个应用：歪麦霸王餐、小蚕惠生活、洪城一卡通、魔方网盘。
+ * <p>一个模块覆盖四个应用：歪麦霸王餐、小蚕惠生活、洪城一卡通、123云盘。
  * 作用域写在 {@code META-INF/xposed/scope.list}（staticScope），用户安装即可用。</p>
  */
 public class HookEntry extends XposedModule {
