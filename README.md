@@ -62,6 +62,12 @@ LSPosed 模块，API **102**（libxposed），一个模块覆盖四个应用：
 
 日志 TAG：`ADCLEAN`（`logcat -s ADCLEAN` 或 LSPosed 日志里过滤）。
 
+## 深入阅读
+
+- [analysis/NOTES.md](analysis/NOTES.md)：每个应用查到了什么、为什么这样 hook；
+- [analysis/EXPERIENCE.md](analysis/EXPERIENCE.md)：arm64 原生工具链、API 102 规范、
+  加固应用的安装时机、调试方法。
+
 ## 构建
 
 不依赖 Gradle，手工链：`javac` → `d8` → `aapt` → 塞 `META-INF/xposed` →
@@ -107,8 +113,12 @@ src/io/github/sql0106/adclean/
   YktHooks.java               洪城一卡通专属规则
   compat/                     legacy Xposed API 门面（复用于 zybclean）
 libs/libxposed-api-102.jar    编译期依赖
-build.sh / deploy.sh / enable_module.sh / check.sh
-.github/workflows/build.yml
+build.sh                      本地构建（javac + d8 + aapt + apksigner，全原生）
+deploy.sh                     装到手机并强制停止目标应用
+check.sh                      看 ADCLEAN 日志与目标进程
+analysis/NOTES.md             四个应用的分析结论与每条 hook 的来由
+analysis/EXPERIENCE.md        工具链 / API 102 / 加固应用 / 调试经验
+.github/workflows/build.yml   arm64 runner + 原生 deb + 缓存 + 日志
 ```
 
 ## 声明
