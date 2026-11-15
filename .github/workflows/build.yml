@@ -1,0 +1,165 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # 全部原生：arm64 runner + Debian/Ubuntu 自带的 arm64 aapt/zipalign，
+    # 不用 Google 的 x86_64 build-tools，也不做任何转译。
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 校验 runner 架构
+        run: |
+          uname -m
+          test "$(uname -m)" = "aarch64"
+
+      - name: 安装原生打包工具
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            aapt zipalign apksigner unzip zip curl
+          aapt version
+          zipalign -h 2>&1 | head -1
+          apksigner --version
+          file "$(command -v aapt)" "$(command -v zipalign)"
+
+      - name: 缓存 platform zip 与 r8
+        uses: actions/cache@v6
+        with:
+          path: ~/android-cache
+          key: adclean-tools-platform34-v1-r8-9.5.32
+
+      # android.jar 是架构无关的 Java 资源包；aapt 用 arm64 原生版本。
+      # 直接下官方 zip（不用 sdkmanager，它装的 jar 会被 Debian aapt 报
+      # "Entry offset ... points outside the Type's boundaries"）。
+      - name: 准备 android.jar
+        env:
+          PLATFORM_ZIP: platform-34-ext7_r02.zip
+        run: |
+          set -euo pipefail
+          cache="$HOME/android-cache"
+          mkdir -p "$cache" .sdk/platforms
+          zip="$cache/$PLATFORM_ZIP"
+          if ! unzip -tq "$zip" >/dev/null 2>&1; then
+            echo "下载 $PLATFORM_ZIP"
+            curl -sSL --retry 5 --retry-delay 3 -o "$zip" \
+              "https://dl.google.com/android/repository/$PLATFORM_ZIP"
+          fi
+          unzip -q -o "$zip" -d .sdk/platforms
+          ls -l .sdk/platforms/*/android.jar
+          # 冒烟：确认 arm64 aapt 真能链接这个 jar
+          mkdir -p "$RUNNER_TEMP/jarcheck"
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' \
+            '<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="smoke.test">' \
+            '<uses-sdk android:minSdkVersion="24" android:targetSdkVersion="36" /></manifest>' \
+            > "$RUNNER_TEMP/jarcheck/AndroidManifest.xml"
+          aapt package -f -M "$RUNNER_TEMP/jarcheck/AndroidManifest.xml" \
+            -I .sdk/platforms/android-34/android.jar -F "$RUNNER_TEMP/jarcheck/smoke.apk"
+          echo SMOKE_OK
+
+      - name: 准备 r8（纯 Java，由 arm64 JVM 执行）
+        run: |
+          set -euo pipefail
+          cache="$HOME/android-cache"
+          jar="$cache/r8-9.5.32.jar"
+          if [ ! -s "$jar" ]; then
+            curl -sSL --retry 5 --retry-delay 3 -o "$jar" \
+              "https://repo1.maven.org/maven2/com/android/tools/r8/9.5.32/r8-9.5.32.jar"
+          fi
+          java -cp "$jar" com.android.tools.r8.D8 --version
+          cp "$jar" .sdk/r8-9.5.32.jar
+
+      - name: 编译
+        shell: bash
+        env:
+          ANDROID_SDK_ROOT: ${{ github.workspace }}/.sdk
+        run: |
+          set -o pipefail
+          chmod +x build.sh
+          rm -f adclean-*.apk adclean.apk
+          ./build.sh 2>&1 | tee build.log
+
+      - name: 编译信息
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "== uname"; uname -m
+            echo "== java"; java -version 2>&1
+            echo "== tools"; aapt version 2>&1 | head -2
+            echo "== 产物"; ls -l adclean-*.apk adclean.apk 2>&1
+          } > build-info.txt || true
+          cat build-info.txt
+
+      - name: 失败现场打包
+        if: failure()
+        shell: bash
+        run: |
+          tar czf build-failure.tar.gz build.log build-info.txt build 2>/dev/null \
+            || tar czf build-failure.tar.gz build.log build-info.txt 2>/dev/null || true
+
+      - name: 取版本号
+        shell: bash
+        run: |
+          VER="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' AndroidManifest.xml | head -1)"
+          test -n "$VER"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "版本: $VER"
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          path: adclean-${{ env.VER }}-universal.apk
+          archive: false
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 上传日志（总是）
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: build-logs
+          path: |
+            build.log
+            build-info.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: 上传失败现场（失败时）
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: build-failure
+          path: |
+            build-failure.tar.gz
+            build-info.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: 发布 Release（打 tag 时）
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: adclean-${{ env.VER }}-universal.apk
+          generate_release_notes: true

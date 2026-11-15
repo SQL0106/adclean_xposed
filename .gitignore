@@ -1,0 +1,8 @@
+.sdk/
+build/
+apks/
+toolchain/
+*.apk
+build.log
+build-info.txt
+build-failure.tar.gz

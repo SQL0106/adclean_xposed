@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">应用去广告</string>
+    <string name="xposed_description">去掉歪麦霸王餐、小蚕惠生活、洪城一卡通、魔方网盘的开屏、插屏、激励视频、信息流广告与推广弹窗（LSPosed，API 102）</string>
+</resources>
