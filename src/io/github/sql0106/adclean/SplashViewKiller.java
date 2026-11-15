@@ -28,6 +28,7 @@ import io.github.sql0106.adclean.compat.XposedBridge;
  */
 public final class SplashViewKiller {
 
+
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
     /** 隐藏后 SDK 还可能把 visibility 改回来，重试几次。 */

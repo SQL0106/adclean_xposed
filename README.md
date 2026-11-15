@@ -1,16 +1,16 @@
 # 应用去广告（adclean）
 
-LSPosed 模块，API **102**（libxposed），一个模块覆盖四个应用：
+LSPosed 模块，API **102**（libxposed），一个模块覆盖三个应用：
 
 | 应用 | 包名 | 适配版本 |
 |---|---|---|
 | 歪麦霸王餐 | `com.waimaiii.waimaiii` | 1.1.220 (vc303) |
 | 小蚕惠生活 | `com.realtech.xiaocan` | 3.22.4 (vc3040) |
 | 洪城一卡通 | `com.jieyisoft.weex.yktApp` | 3.2.2 (vc30202) |
-| 123云盘 | `com.mfcloudcalculate.networkdisk` | 3.3.6 (vc3248) |
+| ~~123云盘~~ | `com.mfcloudcalculate.networkdisk` | 3.3.6 (vc3248) — **已移除**，见「已知限制」 |
 
-作用域（`META-INF/xposed/scope.list`）已内置四个包名，配合 `staticScope=true`，
-安装后只要在 LSPosed 里启用模块、勾选这四个应用（新版 LSPosed 会自动带上）即可，
+作用域（`META-INF/xposed/scope.list`）已内置上面三个包名，配合 `staticScope=true`，
+安装后只要在 LSPosed 里启用模块、勾选这三个应用（新版 LSPosed 会自动带上）即可，
 不需要手动填作用域。
 
 ## 去的是什么广告
@@ -51,13 +51,17 @@ LSPosed 模块，API **102**（libxposed），一个模块覆盖四个应用：
   不做业务代码 patch。
 - 应用更新后类名/方法签名可能变化，模块会静默跳过（`ADCLEAN` 日志里会记
   `missing hook`），不会导致应用崩溃（`exceptionMode=protective`）。
+- **123云盘（`com.mfcloudcalculate.networkdisk`）已从作用域移除**：模块能注入、日志正常，
+  但装完钩子后**任何回调都不再触发**（连模块自己起的诊断线程都不跑，`probe thread started`
+  之后再无输出），说明它的加固壳把 LSPosed 注入的代码整体废掉了。实测其开屏广告
+  （`LauncherActivity` 窗口内、优量汇/其它聚合 SDK 渲染）在 Java 层没有可用落点，故放弃。
 - 只处理广告，不动会员、付费、签到奖励等业务逻辑。
 
 ## 安装
 
 1. 从 [Releases](../../releases) 或 Actions 产物下载 `adclean-<版本>-universal.apk`；
 2. `adb install -r` 安装（或直接在手机上点开）；
-3. LSPosed 里启用「应用去广告」，作用域勾选上面四个应用；
+3. LSPosed 里启用「应用去广告」，作用域勾选上面三个应用；
 4. 强制停止这四个应用再打开（`am force-stop <包名>`）。
 
 日志 TAG：`ADCLEAN`（`logcat -s ADCLEAN` 或 LSPosed 日志里过滤）。

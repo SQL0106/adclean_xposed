@@ -46,8 +46,8 @@ public final class XposedBridge {
         }
     }
 
-    /** hook 单个方法/构造器。 */
-    public static void hookMethod(Member member, XC_MethodHook callback) {
+    /** hook 单个方法/构造器，成功返回 true。 */
+    public static boolean hookMethod(Member member, XC_MethodHook callback) {
         XposedInterface f = sFramework;
         if (f == null) throw new IllegalStateException("XposedBridge not bound yet");
         if (!(member instanceof Executable)) {
@@ -56,6 +56,7 @@ public final class XposedBridge {
         f.hook((Executable) member)
                 .setExceptionMode(ExceptionMode.PROTECTIVE)
                 .intercept(new BridgeHooker(callback));
+        return true;
     }
 
     /** hook 名字匹配的全部重载，返回成功个数（抽象的跳过，不抛）。 */

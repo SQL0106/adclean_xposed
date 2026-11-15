@@ -1,0 +1,23 @@
+Signature-Version: 1.0
+Created-By: 1.0 (Android)
+SHA-256-Digest-Manifest: 4PYjC7/iK00cB5OJ17T006veYQWItB1arKFpHMDVD54=
+X-Android-APK-Signed: 2, 3
+
+Name: AndroidManifest.xml
+SHA-256-Digest: Ri4HdOb0qWQ/OwkRctFpfw5rW9Q+hLzMngAoDmPlTMo=
+
+Name: META-INF/xposed/java_init.list
+SHA-256-Digest: sfVTaSugfqAG8VXDAgLIY0Tk+bwa1cUAjqH+mVTxgIo=
+
+Name: META-INF/xposed/module.prop
+SHA-256-Digest: 2W78Bj9JUoC9N28QjmMMv05W/KT5InevUI1cKzX635o=
+
+Name: META-INF/xposed/scope.list
+SHA-256-Digest: GiC4y098hXimptM66pxmQBvvGWERkXdkEFr3l2p174c=
+
+Name: classes.dex
+SHA-256-Digest: 3bNlUexhr4zy5h+De1JBEOGq8zqm3BO/tDBfkEacToM=
+
+Name: resources.arsc
+SHA-256-Digest: axx5ifEBce9gdDAcpw1Md3lSrGbvwxXcbE9qaWgoxmE=
+

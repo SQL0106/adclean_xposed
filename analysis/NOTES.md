@@ -233,3 +233,35 @@ Activity **stop** 时框架要把 Fragment 的 saved state 序列化来统计体
 因此新增 `SplashViewKiller`：hook `ViewGroup#addView` 的 5 个重载，child 类名命中
 广告 SDK 前缀且含 `splash`/`openscreen` 就 `setVisibility(GONE)`（0/300/1000/2500ms
 重设，防 SDK 又改回来）。纯字符串判断，不反射、不打日志刷屏（每类名只记一次）。
+
+### 5.3 123云盘：模块装完就不再执行（放弃了）
+
+现象链（全部来自真机日志 `grep ADCLEAN /data/adb/lspd/log/verbose_*.log`）：
+
+```
+module loaded, process=com.mfcloudcalculate.networkdisk, api=102
+package loaded: com.mfcloudcalculate.networkdisk
+splash view killer installed, 5 addView overload(s)
+probe thread started          <- 我们自己起的守护线程，本该每 5 秒打一条 probe tick
+probe hooks installed
+view sweeper installed, 3 entry point(s)
+hooks installed for com.mfcloudcalculate.networkdisk
+```
+
+之后**什么都不再发生**：没有 `probe tick`（线程没跑起来）、没有 `addView called`、
+没有 `sweep scheduled`、没有 `activity ...`；LSPosed 侧也没有任何异常或 hook 失败记录。
+同一份代码在歪麦（`addView` 生效）、小蚕（30+ 条 hook）、洪城一卡通
+（`class-load watcher` + Activity 钩子）上都正常，所以不是 compat 层的问题。
+
+排除过的可能：
+
+| 猜测 | 结论 |
+|---|---|
+| 广告在子进程 | `ps -A` 只有一个进程，`dumpsys window` 里 `MainActivity` 窗口属主就是注入的 pid |
+| 广告是独立 Activity | 逐帧 `dumpsys window`：开屏全程 `mCurrentFocus` 都是 `.../activity.LauncherActivity` |
+| 没有作用域 | 有，`module loaded, process=...` 就是该进程 |
+| 钩子注册失败 | 日志里能打出 5/3/3 个入口，注册没抛异常 |
+
+结论：加固壳在模块代码跑完 `onPackageLoaded` 之后把它整体停掉了（线程都没起来），
+Java 层没有可用的拦截点。按用户「实在不行就不做了」的要求，把它从 `scope.list`
+与 `isTarget()` 里移除。

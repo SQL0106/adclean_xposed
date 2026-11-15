@@ -54,6 +54,14 @@ public final class ClassLoadWatch {
         installed = true;
         sPackage = pkg;
 
+        // 歪麦 / 123云盘的加固壳用非常规方式定义内存 dex（实测：三个入口都 alive，
+        // 但一条 SDK 类都没看见），挂着这几个热路径钩子只会白付性能代价 —— 直接不装，
+        // 这两个应用改由 ViewSweeper / SplashViewKiller 在 View 层处理。
+        if (HookEntry.WAIMAI.equals(pkg) || HookEntry.MFCLOUD.equals(pkg)) {
+            HookEntry.log("class-load watcher skipped (shell bypasses it; view layer only)");
+            return;
+        }
+
         ClassResultHook hook = new ClassResultHook("?");
 
         // 1) 常规路径（小蚕这类壳走的就是它）

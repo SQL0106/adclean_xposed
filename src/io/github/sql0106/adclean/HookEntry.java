@@ -42,9 +42,12 @@ public class HookEntry extends XposedModule {
         }
         try {
             // 开屏广告是 SDK 的 Flutter Overlay View（不是 Activity），
-            // 只能在 addView 那一步隐藏；只给两个 Flutter 应用开，别的应用不需要
-            if (WAIMAI.equals(pkg) || MFCLOUD.equals(pkg)) {
+            // 只能在 addView 那一步隐藏；只给歪麦开，别的应用不需要。
+            // 123云盘 不在这里：它的壳会让 LSPosed 注入的代码装完就不再执行，
+            // 任何 Java 层钩子都不回调（已实测），故不纳入作用域。
+            if (WAIMAI.equals(pkg)) {
                 SplashViewKiller.install();
+                ViewSweeper.install();
             }
         } catch (Throwable t) {
             log("SplashViewKiller install failed", t);
@@ -75,9 +78,9 @@ public class HookEntry extends XposedModule {
         log("hooks installed for " + pkg);
     }
 
+    /** 临时诊断：确认进程内「我们的代码」还活着，以及任何 hook 回调是否会发生。 */
     static boolean isTarget(String pkg) {
-        return WAIMAI.equals(pkg) || XIAOCAN.equals(pkg)
-                || YKT.equals(pkg) || MFCLOUD.equals(pkg);
+        return WAIMAI.equals(pkg) || XIAOCAN.equals(pkg) || YKT.equals(pkg);
     }
 
     public static void log(String msg) {
