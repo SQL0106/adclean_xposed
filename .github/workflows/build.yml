@@ -82,10 +82,12 @@ jobs:
           set -euo pipefail
           cache="$HOME/android-cache"
           jar="$cache/r8-9.5.32.jar"
-          if [ ! -s "$jar" ]; then
-            curl -sSL --retry 5 --retry-delay 3 -o "$jar" \
-              "https://repo1.maven.org/maven2/com/android/tools/r8/9.5.32/r8-9.5.32.jar"
+          # r8 只发在 Google Maven，Maven Central 没有
+          if [ ! -s "$jar" ] || ! java -cp "$jar" com.android.tools.r8.D8 --version >/dev/null 2>&1; then
+            curl -fsSL --retry 5 --retry-delay 3 -o "$jar" \
+              "https://dl.google.com/dl/android/maven2/com/android/tools/r8/9.5.32/r8-9.5.32.jar"
           fi
+          test -s "$jar"
           java -cp "$jar" com.android.tools.r8.D8 --version
           cp "$jar" .sdk/r8-9.5.32.jar
 
