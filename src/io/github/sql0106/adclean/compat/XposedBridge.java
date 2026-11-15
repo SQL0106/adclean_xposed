@@ -58,11 +58,20 @@ public final class XposedBridge {
                 .intercept(new BridgeHooker(callback));
     }
 
-    /** hook 名字匹配的全部重载（含抽象方法会抛 IllegalArgumentException，调用方自担）。 */
-    public static void hookAllMethods(Class<?> clazz, String methodName, XC_MethodHook callback) {
+    /** hook 名字匹配的全部重载，返回成功个数（抽象的跳过，不抛）。 */
+    public static int hookAllMethods(Class<?> clazz, String methodName, XC_MethodHook callback) {
+        int n = 0;
         for (Method m : clazz.getDeclaredMethods()) {
-            if (m.getName().equals(methodName)) hookMethod(m, callback);
+            if (!m.getName().equals(methodName)) continue;
+            if (java.lang.reflect.Modifier.isAbstract(m.getModifiers())) continue;
+            try {
+                hookMethod(m, callback);
+                n++;
+            } catch (Throwable ignored) {
+                // 单个重载 hook 失败不影响其它重载
+            }
         }
+        return n;
     }
 
     /** 把现代 API 的拦截链适配成 before/after 两段式。 */

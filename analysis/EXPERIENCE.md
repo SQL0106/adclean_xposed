@@ -104,3 +104,15 @@ CI 跑在 `ubuntu-24.04-arm` 上，全程 arm64 原生；
 - `/data/adb/lspd/config/modules_config.db` 是 LSPosed 的配置库，
   **不要拿 sql 直接改并重启** —— 作用域这种事交给 LSPosed 管理器 UI。
 - 带壳应用不要在真机反复拉前台/截图来做「验证」，测试交给用户，用日志定位。
+
+---
+
+## 五、两条硬经验
+
+1. **找广告入口先看 View，再看类。** 带壳应用的 `ClassLoader#loadClass`、
+   `DexFile#defineClass` 可能都被绕过（易盾就是这样），类加载观察器一条也不命中，
+   但 `ViewGroup#addView` 一定能看到广告容器上树。开屏是 Overlay View
+   （`com.anythink.flutter.splash.ATSplashOverlayView`）而不是 Activity 时尤其如此。
+2. **框架级统计方法可以安全空转。** `BaseBundle#dumpStats` 只用于统计 Bundle 体积，
+   但它会真的去序列化内容；应用把不可序列化对象塞进 Fragment saved state 时，
+   Android 17 在 `onStop` 就会崩。空转它既修崩溃又无副作用。

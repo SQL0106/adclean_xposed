@@ -22,6 +22,11 @@ import io.github.sql0106.adclean.compat.XposedHelpers;
  * {@code onAdLoadFailed(AdError)}。应用自己的失败分支是完整业务分支 ——
  * 开屏失败会立刻 {@code gotoMain()}（实测 LaunchActivity$1.onAdLoadFailed →
  * gotoMain），信息流失败就不渲染广告卡片。</p>
+ *
+ * <p><b>为什么要留一个 deferred 入口：</b>ykt 有 6 个 dex，
+ * {@code com.cqyh.cqadsdk.*} 不一定在 classes.dex 里，模块加载的那一刻
+ * {@code Class.forName} 会报 class not found（实测 11:17 那次就是这样）。
+ * 所以 {@link #inspect(Class)} 由 {@link ClassLoadWatch} 在类真正出现时补装。</p>
  */
 public final class YktHooks {
 
@@ -36,14 +41,58 @@ public final class YktHooks {
 
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
 
+    private static volatile boolean strategyHooked;
+    private static volatile boolean expressHooked;
+
     private YktHooks() {
     }
 
     static void install(ClassLoader cl) {
-        Class<?> strategy = XposedHelpers.findClass(STRATEGY, cl);
-        Class<?> error = XposedHelpers.findClass(AD_ERROR, cl);
+        Class<?> strategy = null;
+        try {
+            strategy = XposedHelpers.findClass(STRATEGY, cl);
+        } catch (Throwable t) {
+            HookEntry.log("ykt: strategy not loaded yet, waiting for class-load watcher");
+        }
+        if (strategy != null) {
+            try {
+                hookStrategy(strategy, cl);
+            } catch (Throwable t) {
+                HookEntry.log("ykt: strategy hook failed", t);
+            }
+        }
+        try {
+            hookExpress(XposedHelpers.findClass(EXPRESS, cl));
+        } catch (Throwable t) {
+            HookEntry.log("ykt: express not loaded yet, deferred");
+        }
+    }
+
+    /** 类加载观察器回调：只在精确命中这两个类时才装钩子。 */
+    static void inspect(Class<?> c) {
+        String n = c.getName();
+        if (STRATEGY.equals(n)) {
+            try {
+                hookStrategy(c, c.getClassLoader());
+            } catch (Throwable t) {
+                HookEntry.log("ykt: strategy hook failed", t);
+            }
+        } else if (EXPRESS.equals(n)) {
+            try {
+                hookExpress(c);
+            } catch (Throwable t) {
+                HookEntry.log("ykt: express hook failed", t);
+            }
+        }
+    }
+
+    private static void hookStrategy(Class<?> strategy, ClassLoader cl) {
+        if (strategyHooked) return;
+        strategyHooked = true;
+
         Constructor<?> ctor = null;
         try {
+            Class<?> error = XposedHelpers.findClass(AD_ERROR, cl);
             ctor = error.getDeclaredConstructor(int.class, String.class);
             ctor.setAccessible(true);
         } catch (Throwable t) {
@@ -55,26 +104,26 @@ public final class YktHooks {
                 if (!m.getName().equals(name)) continue;
                 if (m.getReturnType() != void.class) continue;
                 XposedBridge.hookMethod(m, new FailHook(name, ctor));
-                HookEntry.log("hooked " + STRATEGY + "." + name + "/" + m.getParameterTypes().length);
+                HookEntry.log("hooked " + STRATEGY + "." + name + "/"
+                        + m.getParameterTypes().length);
             }
         }
+    }
 
-        // 双保险：万一有已预缓存的广告实例，render/show 也不让它上屏。
-        try {
-            Class<?> express = XposedHelpers.findClass(EXPRESS, cl);
-            for (Method m : express.getDeclaredMethods()) {
-                if (!m.getName().equals("render") && !m.getName().equals("show")) continue;
-                if (m.getReturnType() != void.class) continue;
-                XposedBridge.hookMethod(m, new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        param.setResult(null);
-                    }
-                });
-                HookEntry.log("hooked " + EXPRESS + "." + m.getName());
-            }
-        } catch (Throwable t) {
-            HookEntry.log("express ad hook skipped: " + t);
+    /** 双保险：万一有已预缓存的广告实例，render/show 也不让它上屏。 */
+    private static void hookExpress(Class<?> express) {
+        if (expressHooked) return;
+        expressHooked = true;
+        for (Method m : express.getDeclaredMethods()) {
+            if (!m.getName().equals("render") && !m.getName().equals("show")) continue;
+            if (m.getReturnType() != void.class) continue;
+            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    param.setResult(null);
+                }
+            });
+            HookEntry.log("hooked " + EXPRESS + "." + m.getName());
         }
     }
 

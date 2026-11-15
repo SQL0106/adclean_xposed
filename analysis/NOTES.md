@@ -191,3 +191,45 @@ finish ad activity com.qq.e.ads.PortraitADActivity
 1. 类名变了 —— 日志里对应条目消失或出现 `hook failed` / `missing hook`；
 2. 广告是 Flutter/Dart 自己画的 —— Java 层没有调用点，日志里不会有 `hooked`；
 3. 走的是没列进前缀的小众 SDK —— 按日志里的广告 Activity 类名补前缀。
+
+---
+
+## 5. 两个「非 hook 能解决」的坑
+
+### 5.1 洪城一卡通 onStop 崩溃（不是本模块引入）
+
+真机 `/data/system/dropbox/data_app_crash@1794711772812.txt`：
+
+```
+BadParcelableException: Parcelable encountered IOException writing serializable object
+  (name = com.vector.update_app.UpdateAppBean)
+  at android.os.Parcel.writeSerializable
+  at android.os.BaseBundle.writeToParcelInner
+  at androidx.fragment.app.FragmentState.writeToParcel
+  at android.os.BaseBundle.dumpStats
+  at android.app.servertransaction.PendingTransactionActions$StopInfo.collectBundleStates
+Caused by: NotSerializableException: com.jieyisoft.weex.yktApp.activity.MainActivity
+```
+
+Activity **stop** 时框架要把 Fragment 的 saved state 序列化来统计体积
+（`StopInfo.collectBundleStates` → `BaseBundle.dumpStats`），而 `UpdateAppBean`
+是 Serializable、字段里挂着不可序列化的 `MainActivity` → 抛异常 → 崩溃。
+
+`dumpStats` 纯统计用途，没有业务语义，所以 `SystemHooks` 把它的三个重载全部
+`setResult(0/false/null)` 空转，崩溃消失（真机验证：`am start` → 回桌面，
+`dropbox` 不再新增 `data_app_crash`）。
+
+### 5.2 歪麦 / 123云盘 的类加载 hook 完全失效
+
+探针（`ViewGroup#addView`）证明广告入口是：
+`com.anythink.flutter.splash.ATSplashOverlayView`（AnyThink 的 **Flutter 插件 Overlay**）
+→ 内含 `com.byazt.pi.TTCountdownViewForCircle`（穿山甲混淆包）+ ImageView/TextView。
+它**不是独立 Activity**，`ActivityKiller` 拦不到。
+
+同时 `ClassLoadWatch` 的三个入口都打了 `entry alive`，但一条 `saw sdk class` 都没有
+—— 加固壳（易盾）用非常规方式定义内存 dex，`loadClass`/`DexFile#defineClass`
+都绕过了。结论：带壳应用**不能只靠类加载观察**，得在 View 树上拦。
+
+因此新增 `SplashViewKiller`：hook `ViewGroup#addView` 的 5 个重载，child 类名命中
+广告 SDK 前缀且含 `splash`/`openscreen` 就 `setVisibility(GONE)`（0/300/1000/2500ms
+重设，防 SDK 又改回来）。纯字符串判断，不反射、不打日志刷屏（每类名只记一次）。

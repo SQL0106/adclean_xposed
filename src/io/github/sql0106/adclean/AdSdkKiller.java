@@ -10,6 +10,7 @@ import java.lang.reflect.Modifier;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.sql0106.adclean.compat.XC_MethodHook;
 import io.github.sql0106.adclean.compat.XposedBridge;
@@ -22,7 +23,8 @@ import io.github.sql0106.adclean.compat.XposedBridge;
  *
  * <ul>
  *   <li>开屏类（类名带 splash）：照常 show，但 show 完把广告容器隐藏 —— 用户看到的是
- *       应用自己的启动背景，倒计时/回调照常走。</li>
+ *       应用自己的启动背景，倒计时/回调照常走。SDK 常在 show 之后异步 {@code addView}，
+ *       所以隐藏做多次重试（0/300/1000/2000ms）。</li>
  *   <li>插屏 / 激励视频 / 信息流原生：直接跳过 show / render，广告永远不上屏。</li>
  *   <li>isReady / isValid 一律返回 false，应用会走「没有广告」的正常分支。</li>
  * </ul>
@@ -36,6 +38,7 @@ public final class AdSdkKiller {
             "com.anythink.",
             "com.bytedance.msdk.",
             "com.bytedance.sdk.openadsdk.",
+            "com.byazt.",
             "com.qq.e.",
             "com.kwad.",
             "com.baidu.mobads.",
@@ -58,8 +61,8 @@ public final class AdSdkKiller {
 
     /** 上屏入口方法名（大小写敏感，SDK 都是小驼峰）。 */
     private static final Set<String> SHOW_METHODS = setOf(
-            "show", "showAd", "showAdView", "showSplashAd", "showInterstitial",
-            "showRewardVideo", "render");
+            "show", "showAd", "showAdView", "showAdWithScene", "showSplash", "showSplashAd",
+            "showInterstitial", "showRewardVideo", "loadAndShow", "render");
 
     /** 状态查询方法名，直接返回 false。 */
     private static final Set<String> READY_METHODS = setOf(
@@ -68,7 +71,13 @@ public final class AdSdkKiller {
     private static final Set<String> DONE =
             Collections.synchronizedSet(new HashSet<String>());
 
+    /** 诊断日志配额：确认「到底有没有看见 SDK 类」，限流避免刷屏。 */
+    private static final AtomicInteger SAW_QUOTA = new AtomicInteger(40);
+
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    /** 开屏 show 之后 SDK 还会异步加 View，隐藏要重试几次。 */
+    private static final long[] HIDE_DELAYS = {0L, 300L, 1000L, 2000L};
 
     private AdSdkKiller() {
     }
@@ -80,8 +89,14 @@ public final class AdSdkKiller {
     }
 
     static void inspect(Class<?> clazz) {
-        String name = clazz.getName();
+        inspect(clazz, clazz.getName());
+    }
+
+    static void inspect(Class<?> clazz, String name) {
         if (!isSdkClass(name)) return;
+        if (SAW_QUOTA.getAndDecrement() > 0) {
+            HookEntry.log("saw sdk class " + name);
+        }
 
         Method[] methods;
         try {
@@ -89,7 +104,10 @@ public final class AdSdkKiller {
         } catch (Throwable t) {
             return;
         }
-        boolean splashClass = name.toLowerCase().contains("splash");
+        if (methods.length == 0) return;
+
+        String lower = name.toLowerCase();
+        boolean splashClass = lower.contains("splash") || lower.contains("openscreen");
 
         for (Method m : methods) {
             if (m.isSynthetic() || Modifier.isAbstract(m.getModifiers())) continue;
@@ -105,25 +123,30 @@ public final class AdSdkKiller {
                 continue;
             }
 
+            // 方法名本身带 splash 的，按开屏处理（隐藏而不是完全跳过）
+            boolean splash = splashClass
+                    || mn.toLowerCase().contains("splash")
+                    || mn.startsWith("showSplash");
+
             String key = name + '#' + mn + '/' + m.getParameterTypes().length;
             if (!DONE.add(key)) continue;
 
             try {
                 if (ready) {
                     XposedBridge.hookMethod(m, new FalseHook(key));
-                } else if (splashClass) {
+                } else if (splash) {
                     XposedBridge.hookMethod(m, new SplashHideHook(key));
                 } else {
                     XposedBridge.hookMethod(m, new SkipHook(key));
                 }
-                HookEntry.log("hooked " + key);
+                HookEntry.log("hooked " + key + (splash ? " (splash)" : ""));
             } catch (Throwable t) {
                 HookEntry.log("hook failed " + key + ": " + t);
             }
         }
     }
 
-    private static boolean isSdkClass(String name) {
+    static boolean isSdkClass(String name) {
         for (String p : SDK_PREFIXES) {
             if (name.startsWith(p)) return true;
         }
@@ -170,30 +193,41 @@ public final class AdSdkKiller {
         @Override
         protected void afterHookedMethod(MethodHookParam param) {
             if (param.hasThrowable()) return;
-            hide(param.args);
+            hide(param.thisObject, param.args, key);
             HookEntry.log("hide splash " + key);
         }
     }
 
-    private static void hide(Object[] args) {
-        if (args == null) return;
-        for (Object a : args) {
-            if (!(a instanceof ViewGroup)) continue;
-            final View v = (View) a;
-            Runnable r = new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        v.setVisibility(View.GONE);
-                    } catch (Throwable ignored) {
-                        // 容器已被移除，忽略
-                    }
+    private static void hide(final Object target, final Object[] args, final String key) {
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    hideNow(target, args);
+                } catch (Throwable ignored) {
+                    // 容器已被移除，忽略
                 }
-            };
-            if (Looper.myLooper() == Looper.getMainLooper()) {
+            }
+        };
+        boolean main = Looper.myLooper() == Looper.getMainLooper();
+        for (long delay : HIDE_DELAYS) {
+            if (delay == 0L && main) {
                 r.run();
             } else {
-                MAIN.post(r);
+                MAIN.postDelayed(r, delay);
+            }
+        }
+    }
+
+    private static void hideNow(Object target, Object[] args) {
+        if (target instanceof View) {
+            ((View) target).setVisibility(View.GONE);
+        }
+        if (args == null) return;
+        for (Object a : args) {
+            // ViewGroup 也是 View，一个分支就够
+            if (a instanceof View) {
+                ((View) a).setVisibility(View.GONE);
             }
         }
     }

@@ -41,6 +41,15 @@ public class HookEntry extends XposedModule {
             log("ClassLoadWatch install failed", t);
         }
         try {
+            // 开屏广告是 SDK 的 Flutter Overlay View（不是 Activity），
+            // 只能在 addView 那一步隐藏；只给两个 Flutter 应用开，别的应用不需要
+            if (WAIMAI.equals(pkg) || MFCLOUD.equals(pkg)) {
+                SplashViewKiller.install();
+            }
+        } catch (Throwable t) {
+            log("SplashViewKiller install failed", t);
+        }
+        try {
             ActivityKiller.install(cl);
         } catch (Throwable t) {
             log("ActivityKiller install failed", t);
@@ -56,6 +65,11 @@ public class HookEntry extends XposedModule {
                 YktHooks.install(cl);
             } catch (Throwable t) {
                 log("YktHooks install failed", t);
+            }
+            try {
+                SystemHooks.install();
+            } catch (Throwable t) {
+                log("SystemHooks install failed", t);
             }
         }
         log("hooks installed for " + pkg);
